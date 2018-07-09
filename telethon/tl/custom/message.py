@@ -1,32 +1,24 @@
+import abc
+
+from .forward import Forward
+from .messagebutton import MessageButton
 from .. import types
 from ...utils import get_input_peer, get_peer_id, get_inner_text
-from .messagebutton import MessageButton
-from .forward import Forward
 
 
-class Message:
+class CommonMessage(abc.ABC):
     """
-    Custom class that encapsulates a message providing an abstraction to
-    easily access some commonly needed features (such as the markdown text
-    or the text for a given message entity).
+    This abstract class assumes it will be a mixin of a second class that
+    aggregates both :tl:`Message` (or :tl:`MessageService`) in itself to
+    provide full functionality. These are implementation details.
 
-    Attributes:
+    As an end user, one simply should know that this class aggregates
+    both :tl:`Message` and :tl:`MessageService` attributes into a single
+    place to ease their usage with different new properties and methods.
 
-        original_message (:tl:`Message`):
-            The original :tl:`Message` object.
-
-        Any other attribute:
-            Attributes not described here are the same as those available
-            in the original :tl:`Message`.
+    You may still want to use `isinstance` to treat both types differently.
     """
-    def __init__(self, client, original, entities, input_chat):
-        # Share the original dictionary. Modifications to this
-        # object should also be reflected in the original one.
-        # This way there's no need to worry about get/setattr.
-        self.__dict__ = original.__dict__
-        self.original_message = original
-        self.stringify = self.original_message.stringify
-        self.to_dict = self.original_message.to_dict
+    def __init__(self, client, entities, input_chat):
         self._client = client
         self._text = None
         self._reply_message = None
@@ -34,7 +26,7 @@ class Message:
         self._buttons_flat = None
         self._buttons_count = None
 
-        self._sender = entities.get(self.original_message.from_id)
+        self._sender = entities.get(self.from_id)
         if self._sender:
             self._input_sender = get_input_peer(self._sender)
             if not getattr(self._input_sender, 'access_hash', None):
@@ -44,11 +36,10 @@ class Message:
 
         # Determine the right chat where the message
         # was sent, not *to which ID* it was sent.
-        if not self.original_message.out \
-                and isinstance(self.original_message.to_id, types.PeerUser):
-            self._chat_peer = types.PeerUser(self.original_message.from_id)
+        if not self.out and isinstance(self.to_id, types.PeerUser):
+            self._chat_peer = types.PeerUser(self.from_id)
         else:
-            self._chat_peer = self.original_message.to_id
+            self._chat_peer = self.to_id
 
         self._chat = entities.get(self.chat_id)
         self._input_chat = input_chat
@@ -58,28 +49,10 @@ class Message:
                 # Telegram may omit the hash in updates -> invalid peer
                 self._input_chat = None
 
-        if getattr(self.original_message, 'fwd_from', None):
-            self._forward = Forward(
-                self._client, self.original_message.fwd_from, entities)
+        if self.__dict__.get('fwd_from'):
+            self._forward = Forward(self._client, self.fwd_from, entities)
         else:
             self._forward = None
-
-    def __new__(cls, client, original, entities, input_chat):
-        if isinstance(original, types.Message):
-            return super().__new__(_CustomMessage)
-        elif isinstance(original, types.MessageService):
-            return super().__new__(_CustomMessageService)
-        else:
-            return cls
-
-    def __str__(self):
-        return str(self.original_message)
-
-    def __repr__(self):
-        return repr(self.original_message)
-
-    def __bytes__(self):
-        return bytes(self.original_message)
 
     @property
     def client(self):
@@ -95,24 +68,22 @@ class Message:
         The message text, formatted using the client's default parse mode.
         Will be ``None`` for :tl:`MessageService`.
         """
-        if self._text is None\
-                and isinstance(self.original_message, types.Message):
+        if self._text is None:
             if not self._client.parse_mode:
-                return self.original_message.message
+                return self.message
             self._text = self._client.parse_mode.unparse(
-                self.original_message.message, self.original_message.entities)
+                self.message, self.entities)
         return self._text
 
     @text.setter
     def text(self, value):
-        if isinstance(self.original_message, types.Message):
-            if self._client.parse_mode:
-                msg, ent = self._client.parse_mode.parse(value)
-            else:
-                msg, ent = value, []
-            self.original_message.message = msg
-            self.original_message.entities = ent
-            self._text = value
+        if self._client.parse_mode:
+            msg, ent = self._client.parse_mode.parse(value)
+        else:
+            msg, ent = value, []
+        self.message = msg
+        self.entities = ent
+        self._text = value
 
     @property
     def raw_text(self):
@@ -120,15 +91,13 @@ class Message:
         The raw message text, ignoring any formatting.
         Will be ``None`` for :tl:`MessageService`.
         """
-        if isinstance(self.original_message, types.Message):
-            return self.original_message.message
+        return self.message
 
     @raw_text.setter
     def raw_text(self, value):
-        if isinstance(self.original_message, types.Message):
-            self.original_message.message = value
-            self.original_message.entities = []
-            self._text = None
+        self.message = value
+        self.entities = []
+        self._text = None
 
     @property
     def message(self):
@@ -136,11 +105,11 @@ class Message:
         The raw message text, ignoring any formatting.
         Will be ``None`` for :tl:`MessageService`.
         """
-        return self.raw_text
+        return self.__dict__.get('message')
 
     @message.setter
     def message(self, value):
-        self.raw_text = value
+        self.__dict__['message'] = value
 
     @property
     def action(self):
@@ -148,8 +117,7 @@ class Message:
         The :tl:`MessageAction` for the :tl:`MessageService`.
         Will be ``None`` for :tl:`Message`.
         """
-        if isinstance(self.original_message, types.MessageService):
-            return self.original_message.action
+        return self.__dict__.get('action')
 
     # TODO Make a property for via_bot and via_input_bot, as well as get_*
     async def _reload_message(self):
@@ -159,8 +127,7 @@ class Message:
         """
         try:
             chat = await self.get_input_chat() if self.is_channel else None
-            msg = await self._client.get_messages(
-                chat, ids=self.original_message.id)
+            msg = await self._client.get_messages(chat, ids=self.id)
         except ValueError:
             return  # We may not have the input chat/get message failed
         if not msg:
@@ -234,7 +201,7 @@ class Message:
                 return None
             try:
                 self._input_sender = self._client.session\
-                    .get_input_entity(self.original_message.from_id)
+                    .get_input_entity(self.from_id)
             except ValueError:
                 pass
         return self._input_sender
@@ -291,7 +258,7 @@ class Message:
         """
         Returns the marked sender integer ID, if present.
         """
-        return self.original_message.from_id
+        return self.from_id
 
     @property
     def chat_id(self):
@@ -308,26 +275,23 @@ class Message:
     @property
     def is_private(self):
         """True if the message was sent as a private message."""
-        return isinstance(self.original_message.to_id, types.PeerUser)
+        return isinstance(self.to_id, types.PeerUser)
 
     @property
     def is_group(self):
         """True if the message was sent on a group or megagroup."""
-        return (
-            isinstance(self.original_message.to_id, (types.PeerChat,
-                                                     types.PeerChannel))
-            and not self.original_message.post
-        )
+        return not self.post and isinstance(
+            self.to_id, (types.PeerChat, types.PeerChannel))
 
     @property
     def is_channel(self):
         """True if the message was sent on a megagroup or channel."""
-        return isinstance(self.original_message.to_id, types.PeerChannel)
+        return isinstance(self.to_id, types.PeerChannel)
 
     @property
     def is_reply(self):
         """True if the message is a reply to some other or not."""
-        return bool(self.original_message.reply_to_msg_id)
+        return bool(self.reply_to_msg_id)
 
     @property
     def forward(self):
@@ -341,13 +305,12 @@ class Message:
         """
         Helper methods to set the buttons given the input sender and chat.
         """
-        if isinstance(self.original_message.reply_markup, (
+        if isinstance(self.reply_markup, (
                 types.ReplyInlineMarkup, types.ReplyKeyboardMarkup)):
             self._buttons = [[
-                MessageButton(self._client, button, chat, bot,
-                              self.original_message.id)
+                MessageButton(self._client, button, chat, bot, self.id)
                 for button in row.buttons
-            ] for row in self.original_message.reply_markup.rows]
+            ] for row in self.reply_markup.rows]
             self._buttons_flat = [x for row in self._buttons for x in row]
 
     def _needed_markup_bot(self):
@@ -358,7 +321,7 @@ class Message:
         to know what bot we want to start. Raises ``ValueError`` if the bot
         cannot be found but is needed. Returns ``None`` if it's not needed.
         """
-        for row in self.original_message.reply_markup.rows:
+        for row in self.reply_markup.rows:
             for button in row.buttons:
                 if isinstance(button, types.KeyboardButtonSwitchInline):
                     if button.same_peer:
@@ -367,7 +330,7 @@ class Message:
                             raise ValueError('No input sender')
                     else:
                         return self._client.session.get_input_entity(
-                            self.original_message.via_bot_id)
+                            self.via_bot_id)
 
     @property
     def buttons(self):
@@ -375,7 +338,7 @@ class Message:
         Returns a matrix (list of lists) containing all buttons of the message
         as `telethon.tl.custom.messagebutton.MessageButton` instances.
         """
-        if not isinstance(self.original_message, types.Message):
+        if not hasattr(self, 'reply_markup'):
             return  # MessageService and MessageEmpty have no markup
 
         if self._buttons is None and self.original_message.reply_markup:
@@ -395,8 +358,7 @@ class Message:
         Returns `buttons`, but will make an API call to find the
         input chat (needed for the buttons) unless it's already cached.
         """
-        if not self.buttons and isinstance(
-                self.original_message, types.Message):
+        if not self.buttons and hasattr(self, 'reply_markup'):
             chat = await self.get_input_chat()
             if not chat:
                 return
@@ -415,18 +377,14 @@ class Message:
         """
         Returns the total button count.
         """
-        if not isinstance(self.original_message, types.Message):
+        if not hasattr(self, 'reply_markup'):
             return 0
 
         if self._buttons_count is None and isinstance(
-                self.original_message.reply_markup, (
-                        types.ReplyInlineMarkup, types.ReplyKeyboardMarkup
-                )):
-            self._buttons_count = sum(
-                1
-                for row in self.original_message.reply_markup.rows
-                for _ in row.buttons
-            )
+                self.reply_markup, (types.ReplyInlineMarkup,
+                                    types.ReplyKeyboardMarkup)):
+            self._buttons_count = sum(len(row.buttons)
+                                      for row in self.reply_markup.rows)
 
         return self._buttons_count or 0
 
@@ -435,12 +393,12 @@ class Message:
         """
         Returns the media of the message.
         """
-        if isinstance(self.original_message, types.Message):
-            return self.original_message.media
-        elif isinstance(self.original_message, types.MessageService):
-            action = self.original_message.action
-            if isinstance(action, types.MessageActionChatEditPhoto):
-                return types.MessageMediaPhoto(action.photo)
+        media = self.__dict__.get('media')
+        if media is None and isinstance(
+                self.action, types.MessageActionChatEditPhoto):
+            media = types.MessageMediaPhoto(self.action.photo)
+
+        return media
 
     @property
     def photo(self):
@@ -537,7 +495,7 @@ class Message:
         *not* considered outgoing, just like official clients
         display them.
         """
-        return self.original_message.out
+        return self.__dict__['out']
 
     async def get_reply_message(self):
         """
@@ -547,12 +505,13 @@ class Message:
         Note that this will make a network call to fetch the message and
         will later be cached.
         """
+        if not self.reply_to_msg_id:
+            return
+
         if self._reply_message is None:
-            if not self.original_message.reply_to_msg_id:
-                return None
             self._reply_message = await self._client.get_messages(
                 await self.get_input_chat() if self.is_channel else None,
-                ids=self.original_message.reply_to_msg_id
+                ids=self.reply_to_msg_id
             )
 
         return self._reply_message
@@ -572,7 +531,7 @@ class Message:
         `telethon.telegram_client.TelegramClient.send_message` with
         both ``entity`` and ``reply_to`` already set.
         """
-        kwargs['reply_to'] = self.original_message.id
+        kwargs['reply_to'] = self.id
         return await self._client.send_message(
             await self.get_input_chat(), *args, **kwargs)
 
@@ -586,7 +545,7 @@ class Message:
         this `forward_to` method. Use a
         `telethon.telegram_client.TelegramClient` instance directly.
         """
-        kwargs['messages'] = self.original_message.id
+        kwargs['messages'] = self.id
         kwargs['from_peer'] = await self.get_input_chat()
         return await self._client.forward_messages(*args, **kwargs)
 
@@ -599,17 +558,17 @@ class Message:
         Returns ``None`` if the message was incoming, or the edited
         :tl:`Message` otherwise.
         """
-        if self.original_message.fwd_from:
+        if self.__dict__.get('fwd_from', True):
             return None
-        if not self.original_message.out:
-            if not isinstance(self.original_message.to_id, types.PeerUser):
+        if not self.out:
+            if not isinstance(self.to_id, types.PeerUser):
                 return None
             me = await self._client.get_me(input_peer=True)
-            if self.original_message.to_id.user_id != me.user_id:
+            if self.to_id.user_id != me.user_id:
                 return None
 
         return await self._client.edit_message(
-            await self.get_input_chat(), self.original_message,
+            await self.get_input_chat(), self.id,
             *args, **kwargs
         )
 
@@ -626,7 +585,7 @@ class Message:
         `telethon.telegram_client.TelegramClient` instance directly.
         """
         return await self._client.delete_messages(
-            await self.get_input_chat(), [self.original_message],
+            await self.get_input_chat(), [self.id],
             *args, **kwargs
         )
 
@@ -636,8 +595,7 @@ class Message:
         `telethon.telegram_client.TelegramClient.download_media` with
         the ``message`` already set.
         """
-        return await self._client.download_media(
-            self.original_message, *args, **kwargs)
+        return await self._client.download_media(self, *args, **kwargs)
 
     def get_entities_text(self, cls=None):
         """
@@ -655,14 +613,14 @@ class Message:
                 >>> for _, inner_text in m.get_entities_text(MessageEntityCode):
                 >>>     print(inner_text)
         """
-        if not self.original_message.entities:
+        if not self.__dict__.get('entities'):
             return []
 
-        ent = self.original_message.entities
+        ent = self.entities
         if cls and ent:
             ent = [c for c in ent if isinstance(c, cls)]
 
-        texts = get_inner_text(self.original_message.message, ent)
+        texts = get_inner_text(self.message, ent)
         return list(zip(ent, texts))
 
     async def click(self, i=None, j=None, *, text=None, filter=None):
@@ -737,9 +695,9 @@ class Message:
             return await self._buttons[i][j].click()
 
 
-class _CustomMessage(Message, types.Message):
+class Message(types.Message, CommonMessage):
     pass
 
 
-class _CustomMessageService(Message, types.MessageService):
+class MessageService(types.MessageService, CommonMessage):
     pass
