@@ -2,7 +2,7 @@ import abc
 
 from .forward import Forward
 from .messagebutton import MessageButton
-from .. import types
+from .. import types, alltlobjects
 from ...utils import get_input_peer, get_peer_id, get_inner_text
 
 
@@ -406,6 +406,10 @@ class CommonMessage(abc.ABC):
 
         return media
 
+    @media.setter
+    def media(self, value):
+        self.__dict__['media'] = value
+
     @property
     def photo(self):
         """
@@ -502,6 +506,10 @@ class CommonMessage(abc.ABC):
         display them.
         """
         return self.__dict__['out']
+
+    @out.setter
+    def out(self, value):
+        self.__dict__['out'] = value
 
     async def get_reply_message(self):
         """
@@ -709,6 +717,10 @@ class MessageService(types.MessageService, CommonMessage):
     pass
 
 
-# TODO Not actually working
+# We want the types to be our upgraded versions
 types.Message = Message
 types.MessageService = MessageService
+
+# The reader would still reference the old types so update them too
+alltlobjects.tlobjects[Message.CONSTRUCTOR_ID] = Message
+alltlobjects.tlobjects[MessageService.CONSTRUCTOR_ID] = MessageService
