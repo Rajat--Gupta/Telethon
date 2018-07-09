@@ -54,6 +54,12 @@ class CommonMessage(abc.ABC):
         else:
             self._forward = None
 
+    @classmethod
+    def _new(cls, msg, client, entities, input_chat=None):
+        """Finalizes a new instance of the given :tl:`Message`."""
+        cls.__init__(msg, client, entities, input_chat)
+        return msg
+
     @property
     def client(self):
         """
@@ -701,3 +707,8 @@ class Message(types.Message, CommonMessage):
 
 class MessageService(types.MessageService, CommonMessage):
     pass
+
+
+# TODO Not actually working
+types.Message = Message
+types.MessageService = MessageService

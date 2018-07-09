@@ -3,4 +3,4 @@ from .dialog import Dialog
 from .input_sized_file import InputSizedFile
 from .messagebutton import MessageButton
 from .forward import Forward
-from .message import Message
+from .message import CommonMessage, Message, MessageService

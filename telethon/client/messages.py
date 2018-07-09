@@ -255,7 +255,9 @@ class MessageMethods(UploadMethods, MessageParseMethods):
                 # IDs are returned in descending order (or asc if reverse).
                 last_id = message.id
 
-                await yield_(custom.Message(self, message, entities, entity))
+                await yield_(custom.CommonMessage._new(
+                    self, message, entities, entity))
+
                 have += 1
 
             if len(r.messages) < request.limit:
@@ -444,7 +446,7 @@ class MessageMethods(UploadMethods, MessageParseMethods):
         result = await self(request)
         if isinstance(result, types.UpdateShortSentMessage):
             to_id, cls = utils.resolve_id(utils.get_peer_id(entity))
-            return custom.Message(self, types.Message(
+            return custom.CommonMessage._new(types.Message(
                 id=result.id,
                 to_id=cls(to_id),
                 message=message,
@@ -452,7 +454,7 @@ class MessageMethods(UploadMethods, MessageParseMethods):
                 out=result.out,
                 media=result.media,
                 entities=result.entities
-            ), {}, input_chat=entity)
+            ), self, {}, entity)
 
         return self._get_response_message(request, result, entity)
 
@@ -515,8 +517,8 @@ class MessageMethods(UploadMethods, MessageParseMethods):
                 random_to_id[update.random_id] = update.id
             elif isinstance(update, (
                     types.UpdateNewMessage, types.UpdateNewChannelMessage)):
-                id_to_message[update.message.id] = custom.Message(
-                    self, update.message, entities, input_chat=entity)
+                id_to_message[update.message.id] = custom.CommonMessage._new(
+                    update.message, self, entities, entity)
 
         result = [id_to_message[random_to_id[rnd]] for rnd in req.random_id]
         return result[0] if single else result
@@ -733,6 +735,7 @@ class MessageMethods(UploadMethods, MessageParseMethods):
                     from_id and utils.get_peer_id(message.to_id) != from_id):
                 await yield_(None)
             else:
-                await yield_(custom.Message(self, message, entities, entity))
+                await yield_(custom.CommonMessage._new(
+                    message, self, entities, entity))
 
     # endregion

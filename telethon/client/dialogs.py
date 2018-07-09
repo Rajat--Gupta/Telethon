@@ -82,7 +82,7 @@ class DialogMethods(UserMethods):
                 _total[0] = getattr(r, 'count', len(r.dialogs))
             entities = {utils.get_peer_id(x): x
                         for x in itertools.chain(r.users, r.chats)}
-            messages = {m.id: custom.Message(self, m, entities, None)
+            messages = {m.id: custom.CommonMessage._new(m, self, entities)
                         for m in r.messages}
 
             # Happens when there are pinned dialogs
